@@ -75,3 +75,10 @@ replace_libmain: our/eagle_lwip_if.o
 
 clean:
 	rm -f $(OBJS) liblwip.a our/eagle_lwip_if.o
+	
+install: clean all
+	cp ./liblwip.a ./destination/
+	cd ../WLAN-RGB-Para/Source/ && make clean && make && make flash
+
+run: install
+	espTerminal.sh

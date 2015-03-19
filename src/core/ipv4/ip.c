@@ -226,6 +226,14 @@ ip_forward(struct pbuf *p, struct ip_hdr *iphdr, struct netif *inp)
     /* @todo: send ICMP_DUR_NET? */
     goto return_noroute;
   }
+
+  LWIP_DEBUGF(IP_DEBUG, ("ip_route: IP address of interface %c%c%d set to %"U16_F".%"U16_F".%"U16_F".%"U16_F"\n",
+	 netif->name[0], netif->name[1], netif->num,
+	 ip4_addr1_16(&netif->ip_addr),
+	 ip4_addr2_16(&netif->ip_addr),
+	 ip4_addr3_16(&netif->ip_addr),
+	 ip4_addr4_16(&netif->ip_addr)));
+
 #if !IP_FORWARD_ALLOW_TX_ON_RX_NETIF
   /* Do not forward packets onto the same network interface on which
    * they arrived. */
@@ -287,6 +295,18 @@ return_noroute:
 }
 #endif /* IP_FORWARD */
 
+
+/* Incrementaly update a checksum, given old and new 32bit words */
+static inline u16 incr_check_l(u16 old_check, u32 old_word, u32 new_word)
+{ /* see RFC's 1624, 1141 and 1071 for incremental checksum updates */
+	u32 l;
+	old_check = ~ntohs(old_check);
+	old_word = ~old_word;
+	l = (u32)old_check + (old_word>>16) + (old_word&0xffff)
+		+ (new_word>>16) + (new_word&0xffff);
+	return htons(~( (u16)(l>>16) + (l&0xffff) ));
+}
+
 /**
  * This function is called by the network interface device driver when
  * an IP packet is received. The function does the basic checks of the
@@ -304,6 +324,8 @@ return_noroute:
 err_t
 ip_input(struct pbuf *p, struct netif *inp)
 {
+	ip_debug_print(p);
+
   struct ip_hdr *iphdr;
   struct netif *netif;
   u16_t iphdr_hlen;
@@ -383,6 +405,33 @@ ip_input(struct pbuf *p, struct netif *inp)
   /* copy IP addresses to aligned ip_addr_t */
   ip_addr_copy(current_iphdr_dest, iphdr->dest);
   ip_addr_copy(current_iphdr_src, iphdr->src);
+
+
+  // ROUTE
+  static struct netif* last_forward_netif = NULL;
+  static ip_addr_p_t last_forward_ipaddr;
+  /* onyl generaly forwared from outside to inside */
+  if (inp->num == 0 && last_forward_netif != NULL) {
+	// change the destination ip, if the package comes from the outside
+	  ip_addr_copy(iphdr->dest, last_forward_ipaddr);
+	  ip_addr_copy(current_iphdr_dest, last_forward_ipaddr);
+
+	  // decrement time to live
+	  iphdr->_ttl--;
+
+	  IPH_CHKSUM_SET(iphdr, 0);
+	  IPH_CHKSUM_SET(iphdr, inet_chksum(iphdr, IP_HLEN));
+
+
+
+		LWIP_DEBUGF(IP_DEBUG, ("ip_route_in: Backward on interface %c%c%d with %"U16_F".%"U16_F".%"U16_F".%"U16_F"\n",
+				last_forward_netif->name[0], last_forward_netif->name[1], last_forward_netif->num,
+				ip4_addr1_16(&last_forward_netif->ip_addr),
+				ip4_addr2_16(&last_forward_netif->ip_addr),
+				ip4_addr3_16(&last_forward_netif->ip_addr),
+				ip4_addr4_16(&last_forward_netif->ip_addr)));
+		last_forward_netif->output(last_forward_netif, p, &current_iphdr_dest);
+   }
 
   /* match packet against an interface, i.e. is this packet for us? */
 #if LWIP_IGMP
@@ -492,8 +541,51 @@ ip_input(struct pbuf *p, struct netif *inp)
 #if IP_FORWARD
     /* non-broadcast packet? */
     if (!ip_addr_isbroadcast(&current_iphdr_dest, inp)) {
-      /* try to forward IP packet on (other) interfaces */
-      ip_forward(p, iphdr, inp);
+		// ROUTE only for internal netif
+		if (inp->num == 1) {
+			last_forward_netif = inp;
+			ip_addr_copy(last_forward_ipaddr, iphdr->src);
+
+			// decrement ttl
+//			iphdr->_ttl--;
+
+			 struct netif *other_netif = netif_list;
+			 for (; other_netif != NULL; other_netif = other_netif->next) {
+			   if (netif_is_up(other_netif)) {
+				   if (other_netif != inp) {
+					   LWIP_DEBUGF(IP_DEBUG, ("ip_route_out: Forward on interface %c%c%d with %"U16_F".%"U16_F".%"U16_F".%"U16_F"\n",
+						  other_netif->name[0], other_netif->name[1], other_netif->num,
+						  ip4_addr1_16(&other_netif->ip_addr),
+						  ip4_addr2_16(&other_netif->ip_addr),
+						  ip4_addr3_16(&other_netif->ip_addr),
+						  ip4_addr4_16(&other_netif->ip_addr)));
+					   // change the src addr if the package comes from inside
+					   ip_addr_copy(iphdr->src, other_netif->ip_addr);
+
+//					   // reset check sum for recalulating
+					   IPH_CHKSUM_SET(iphdr, 0);
+					   IPH_CHKSUM_SET(iphdr, inet_chksum(iphdr, IP_HLEN));
+
+					   if (iphdr->_proto == IP_PROTO_TCP) {
+						   struct tcp_hdr* tcphdr = (struct tcp_hdr *)(p->payload + IP_HLEN);
+
+						   tcphdr->chksum = incr_check_l(tcphdr->chksum, last_forward_ipaddr.addr, iphdr->src.addr);
+					   // caluclate tcp checksum if needed
+/*					   struct tcp_hdr *tcphdr = NULL;
+					   tcphdr->chksum = inet_chksum_pseudo(tcphdr, &(pcb->local_ip),
+							  &(pcb->remote_ip),
+							  IP_PROTO_TCP, seg->p->tot_len);
+	*/
+					   }
+					   other_netif->output(other_netif, p, &current_iphdr_dest);
+					   break;
+				   }
+			   }
+			 }
+		}
+
+//      /* try to forward IP packet on (other) interfaces */
+//      ip_forward(p, iphdr, inp);
     } else
 #endif /* IP_FORWARD */
     {
