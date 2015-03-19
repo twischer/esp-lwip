@@ -298,13 +298,27 @@ return_noroute:
 
 /* Incrementaly update a checksum, given old and new 32bit words */
 static inline u16 incr_check_l(u16 old_check, u32 old_word, u32 new_word)
-{ /* see RFC's 1624, 1141 and 1071 for incremental checksum updates */
+{
+	/* see RFC's 1624, 1141 and 1071 for incremental checksum updates */
+	LWIP_DEBUGF(IP_DEBUG, ("old_chk %04"X16_F", old_word %08"X32_F", new_word %08"X32_F"\n", old_check, old_word, new_word));
 	u32 l;
-	old_check = ~ntohs(old_check);
+	old_check = ~old_check;
+	LWIP_DEBUGF(IP_DEBUG, ("old_check %04"X16_F"\n", old_check));
+
 	old_word = ~old_word;
+	LWIP_DEBUGF(IP_DEBUG, ("~old_word %08"X32_F"\n", old_word));
+
 	l = (u32)old_check + (old_word>>16) + (old_word&0xffff)
 		+ (new_word>>16) + (new_word&0xffff);
-	return htons(~( (u16)(l>>16) + (l&0xffff) ));
+	LWIP_DEBUGF(IP_DEBUG, ("l %08"X32_F"\n", l));
+
+	u16 new_check = (u16)(l>>16) + (l&0xffff);
+	LWIP_DEBUGF(IP_DEBUG, ("new_chk %04"X16_F"\n", new_check));
+
+	new_check = ~new_check;
+	LWIP_DEBUGF(IP_DEBUG, ("~new_check %04"X16_F"\n", new_check));
+
+	return new_check;
 }
 
 /**
@@ -412,12 +426,19 @@ ip_input(struct pbuf *p, struct netif *inp)
   static ip_addr_p_t last_forward_ipaddr;
   /* onyl generaly forwared from outside to inside */
   if (inp->num == 0 && last_forward_netif != NULL) {
+
+	  /* update tcp check sum if it is a tcp package */
+	  if (iphdr->_proto == IP_PROTO_TCP) {
+		  struct tcp_hdr* tcphdr = (struct tcp_hdr *)(p->payload + IP_HLEN);
+		  tcphdr->chksum = incr_check_l(tcphdr->chksum, iphdr->dest.addr, last_forward_ipaddr.addr);
+	  }
+
 	// change the destination ip, if the package comes from the outside
 	  ip_addr_copy(iphdr->dest, last_forward_ipaddr);
 	  ip_addr_copy(current_iphdr_dest, last_forward_ipaddr);
 
 	  // decrement time to live
-	  iphdr->_ttl--;
+//	  iphdr->_ttl--;
 
 	  IPH_CHKSUM_SET(iphdr, 0);
 	  IPH_CHKSUM_SET(iphdr, inet_chksum(iphdr, IP_HLEN));
@@ -562,20 +583,14 @@ ip_input(struct pbuf *p, struct netif *inp)
 					   // change the src addr if the package comes from inside
 					   ip_addr_copy(iphdr->src, other_netif->ip_addr);
 
-//					   // reset check sum for recalulating
+					   // reset check sum for recalulating
 					   IPH_CHKSUM_SET(iphdr, 0);
 					   IPH_CHKSUM_SET(iphdr, inet_chksum(iphdr, IP_HLEN));
 
+					   /* update tcp check sum if it is a tcp package */
 					   if (iphdr->_proto == IP_PROTO_TCP) {
 						   struct tcp_hdr* tcphdr = (struct tcp_hdr *)(p->payload + IP_HLEN);
-
 						   tcphdr->chksum = incr_check_l(tcphdr->chksum, last_forward_ipaddr.addr, iphdr->src.addr);
-					   // caluclate tcp checksum if needed
-/*					   struct tcp_hdr *tcphdr = NULL;
-					   tcphdr->chksum = inet_chksum_pseudo(tcphdr, &(pcb->local_ip),
-							  &(pcb->remote_ip),
-							  IP_PROTO_TCP, seg->p->tot_len);
-	*/
 					   }
 					   other_netif->output(other_netif, p, &current_iphdr_dest);
 					   break;
