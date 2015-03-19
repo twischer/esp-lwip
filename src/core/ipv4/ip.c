@@ -433,7 +433,10 @@ ip_input(struct pbuf *p, struct netif *inp)
 		  tcphdr->chksum = incr_check_l(tcphdr->chksum, iphdr->dest.addr, last_forward_ipaddr.addr);
 	  } else if (iphdr->_proto == IP_PROTO_UDP) {
 		  struct udp_hdr* udphdr = (struct udp_hdr *)(p->payload + IP_HLEN);
-		  udphdr->chksum = incr_check_l(udphdr->chksum, iphdr->dest.addr, last_forward_ipaddr.addr);
+		  /* onyl update the check sum, if it is used in udp */
+		  if (udphdr->chksum != 0) {
+			udphdr->chksum = incr_check_l(udphdr->chksum, iphdr->dest.addr, last_forward_ipaddr.addr);
+		  }
 	  }
 
 	// change the destination ip, if the package comes from the outside
@@ -565,6 +568,8 @@ ip_input(struct pbuf *p, struct netif *inp)
 #if IP_FORWARD
     /* non-broadcast packet? */
     if (!ip_addr_isbroadcast(&current_iphdr_dest, inp)) {
+
+		if (!ip_addr_ismulticast(&current_iphdr_dest)) {
 		// ROUTE only for internal netif
 		if (inp->num == 1) {
 			last_forward_netif = inp;
@@ -596,7 +601,10 @@ ip_input(struct pbuf *p, struct netif *inp)
 						   tcphdr->chksum = incr_check_l(tcphdr->chksum, last_forward_ipaddr.addr, iphdr->src.addr);
 					   } else if (iphdr->_proto == IP_PROTO_UDP) {
 						   struct udp_hdr* udphdr = (struct udp_hdr *)(p->payload + IP_HLEN);
-						   udphdr->chksum = incr_check_l(udphdr->chksum, last_forward_ipaddr.addr, iphdr->src.addr);
+						   /* onyl update the check sum, if it is used in udp */
+						   if (udphdr->chksum != 0) {
+							udphdr->chksum = incr_check_l(udphdr->chksum, last_forward_ipaddr.addr, iphdr->src.addr);
+						   }
 					   }
 
 					   other_netif->output(other_netif, p, &current_iphdr_dest);
@@ -604,6 +612,7 @@ ip_input(struct pbuf *p, struct netif *inp)
 				   }
 			   }
 			 }
+		}
 		}
 
 //      /* try to forward IP packet on (other) interfaces */
