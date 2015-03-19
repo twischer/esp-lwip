@@ -431,6 +431,9 @@ ip_input(struct pbuf *p, struct netif *inp)
 	  if (iphdr->_proto == IP_PROTO_TCP) {
 		  struct tcp_hdr* tcphdr = (struct tcp_hdr *)(p->payload + IP_HLEN);
 		  tcphdr->chksum = incr_check_l(tcphdr->chksum, iphdr->dest.addr, last_forward_ipaddr.addr);
+	  } else if (iphdr->_proto == IP_PROTO_UDP) {
+		  struct udp_hdr* udphdr = (struct udp_hdr *)(p->payload + IP_HLEN);
+		  udphdr->chksum = incr_check_l(udphdr->chksum, iphdr->dest.addr, last_forward_ipaddr.addr);
 	  }
 
 	// change the destination ip, if the package comes from the outside
@@ -591,7 +594,11 @@ ip_input(struct pbuf *p, struct netif *inp)
 					   if (iphdr->_proto == IP_PROTO_TCP) {
 						   struct tcp_hdr* tcphdr = (struct tcp_hdr *)(p->payload + IP_HLEN);
 						   tcphdr->chksum = incr_check_l(tcphdr->chksum, last_forward_ipaddr.addr, iphdr->src.addr);
+					   } else if (iphdr->_proto == IP_PROTO_UDP) {
+						   struct udp_hdr* udphdr = (struct udp_hdr *)(p->payload + IP_HLEN);
+						   udphdr->chksum = incr_check_l(udphdr->chksum, last_forward_ipaddr.addr, iphdr->src.addr);
 					   }
+
 					   other_netif->output(other_netif, p, &current_iphdr_dest);
 					   break;
 				   }
