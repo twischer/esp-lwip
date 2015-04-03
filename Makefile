@@ -69,7 +69,7 @@ espressif/ping.o \
 	$(CC) -c $(CFLAGS) -o $@ $<
 	$(OBJCOPY) --rename-section .text=.irom0.text --rename-section .literal=.irom0.literal $@
 
-all: liblwip.a $(ADDITIONAL_TARGETS)
+build: liblwip.a $(ADDITIONAL_TARGETS)
 
 liblwip.a: $(OBJS)
 	$(AR) rcs liblwip.a $(OBJS)
@@ -80,9 +80,9 @@ replace_libmain: our/eagle_lwip_if.o
 clean:
 	rm -f $(OBJS) liblwip.a our/eagle_lwip_if.o
 	
-install: clean all
+all: clean build
 	cp ./liblwip.a ./destination/
-	cd ../WLAN-RGB-Para/Source/ && make clean && make && make flash
+	#cd ../WLAN-RGB-Para/Source/ && make clean && make && make flash
 
 run: install
 	espTerminal.sh
