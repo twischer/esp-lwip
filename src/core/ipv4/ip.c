@@ -338,8 +338,6 @@ static inline u16 incr_check_l(u16 old_check, u32 old_word, u32 new_word)
 err_t
 ip_input(struct pbuf *p, struct netif *inp)
 {
-	ip_debug_print(p);
-
   struct ip_hdr *iphdr;
   struct netif *netif;
   u16_t iphdr_hlen;
@@ -458,6 +456,15 @@ ip_input(struct pbuf *p, struct netif *inp)
 				ip4_addr3_16(&last_forward_netif->ip_addr),
 				ip4_addr4_16(&last_forward_netif->ip_addr)));
 		last_forward_netif->output(last_forward_netif, p, &current_iphdr_dest);
+
+		/*
+		 * forward all packages,
+		 * if forward request was given ones.
+		 * Be carful. The dhcp answer have to be gotten,
+		 * before forwarding all packages.
+		 */
+		pbuf_free(p);
+		return ERR_OK;
    }
 
   /* match packet against an interface, i.e. is this packet for us? */
