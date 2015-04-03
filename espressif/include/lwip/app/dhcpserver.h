@@ -73,6 +73,7 @@ typedef struct _list_node{
 #define DHCP_OPTION_END         255
 
 //#define USE_CLASS_B_NET 1
+#define USE_DNS
 #define DHCPS_DEBUG          0
 
 
